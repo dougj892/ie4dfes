@@ -1,0 +1,103 @@
+---
+title: "Example 1 - Testing for non-inferiority"
+output: html_notebook
+---
+
+Impact Evaluations and in particular randomized controlled trials have increasingly gained prominence in the field of development economics.   In our paper "From What Works to Specific Decisions," we argue that Bayesian analysis is often more appropriate than a frequentist analysis when the primary audience of an evaluation is a specific decision-maker. 
+
+In this notebook, we provide code for the first example in the working paper. In that example, a policyaker must decide between two programs which seek to increase income of farming households and conducts a randomized controlled trial to test which of the programmes is more effective. 
+
+To view the other examples from the working paper as well as instructions on how to get started with Stan and RStan click [here](https://github.com/dougj892/ie4dfes).
+
+
+
+## Step 1 - Input fake data
+We first input fake data which we will use to fit our model.
+```{r}
+# Input fake data and save as a list for use in Stan model
+y <- c(0.739, 2.392, 2.034, 4.566, 1.433, 0.504, 0.556, 0.813, 0.916, 1.542, 4.246, 2.772, 2.646, 1.684, 3.478, 1.146, 3.04, 3.148, -0.801, 1.023, 4.054, 2.272, 1.893, 3.322, 2.722, 1.752, 4.487, 1.953, 1.434, 2.424, 2.284, 0.959, 3.542, 0.774, 3.851, 1.793, 1.861, 2.866, 3.043, 2.275, 2.435, 3.091, 2.707, 2.573, 3.391, 3.548, -0.138, 3.432, 3.127, 1.018, 2.915, 3.123, 4.761, 2.462, 2.139, 0.31, 4.092, 3.197, 1.27, 5.5)
+t1 <- rep(c(0,1,0), each = 20)
+t2 <- rep(c(0,0,1), each = 20)
+stan_data <- list(N = 60, y = y, t1 = t1, t2 = t2)
+```
+
+## Step 2 - Specify model in Stan
+We next specify our model in Stan and save this as an R string. The Stan code below encodes the following likelihood and priors.
+
+$$ y_i \sim N(\alpha+\beta_1t1_i+\beta_2t2_i,\sigma_y^2) $$
+$$ p(\alpha)\sim N(0,100); p(\beta1)\sim N(0,100); p(\beta2)\sim N(0,100); p(\sigma) \sim Uniform(0,100) $$
+
+
+```{r}
+# Create Stan model as a string 
+stan_model_string <- "
+data {
+  int<lower=0> N;  // number of observations
+  real y[N];  // outcome variable
+  vector[N] t1;
+  vector[N] t2;
+}
+parameters {
+  // note that since we don't specify any priors Stan uses a uniform prior.
+  // In the case of sigma, since we specify a lower bound, the uniform prior is over (0, infinity)
+  real alpha;
+  real beta1;
+  real beta2;
+  real <lower=0, upper=100> sigma;
+}
+
+
+model {
+  alpha~normal(0,10);
+  beta1~normal(0,10);
+  beta2~normal(0,10);
+  y ~ normal(alpha + beta1*t1+ beta2*t2,sigma);
+}
+"
+```
+
+
+```{r}
+# Import rstan library, fit the model to the data, and extract the posterior draws from the fit object
+library(rstan)
+library(ggplot2)
+fit <- stan(model_code = stan_model_string, data = stan_data, iter = 5000, chains = 4)
+extracted_values <- extract(fit, permute = TRUE)
+# Print the fit object to check for convergence.
+print(fit)
+
+# calculate probability that treatment 2 is bigger than treatment 1
+print("Probability from Stan model that beta 2 is greater than beta 1")
+print(mean(extracted_values$beta2 > extracted_values$beta1))
+
+# Save draws from posterior to csv file for use in calculating test statistic
+output_dir <- "C:/Users/dougj/Documents/Bayes stuff/Output"
+write.csv(data.frame(extracted_values), file.path(output_dir, "multi_arms_draws.csv"))
+```
+
+Print the output
+
+```{r}
+# Density graph of beta2 - beta1
+diff <- extracted_values$beta2 - extracted_values$beta1
+p <- ggplot(data.frame(diff), aes(x=diff))+ geom_density()
+p
+
+# ggsave(file.path(output_dir, "example 1 - beta 1 and beta 2 posterior.png"), p)
+
+```
+
+
+```{r}
+######### COMPARISON WITH MAXIMUM LIKELIHOOD OUTPUT ################
+# Fit a maximum likelihood model to the data.  
+df <- data.frame(y, t1, t2)
+reg_fit <- lm(y ~ t1+ t2, data = df)
+# Calculate probability beta2 > beta1 by treating output from max likelihood as posterior
+vc <- vcov(reg_fit)
+test_equal_se <- (vc[2,2]+vc[3,3]-2*vc[3,2])^.5
+diff <- coef(reg_fit)[2]-coef(reg_fit)[3]
+print("Probability from max likelihood model that beta 2 is greater than beta 1")
+print(pnorm(0, diff, test_equal_se))
+
+```
