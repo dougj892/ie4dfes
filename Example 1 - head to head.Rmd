@@ -1,0 +1,183 @@
+---
+title: "Example 1 - head to head comparison"
+output: html_notebook
+---
+
+Impact Evaluations and in particular randomized controlled trials have increasingly gained prominence in the field of development economics.   In our paper "From What Works to Specific Decisions," we argue that Bayesian analysis is often more appropriate than a frequentist analysis when the primary audience of an evaluation is a specific decision-maker. 
+
+In this notebook, we provide code for the first example in the working paper. In that example, a policyaker must decide between two programs which seek to increase income of farming households and conducts a randomized controlled trial to test which of the programmes is more effective. 
+
+To view the other examples from the working paper as well as instructions on how to get started with Stan and RStan click [here](https://github.com/dougj892/ie4dfes).
+
+
+
+## Step 1 - Input fake data
+We first input fake data which we will use to fit our model. 
+
+```{r}
+# Input fake data and save as a list for use in Stan model
+y <- c(0.739, 2.392, 2.034, 4.566, 1.433, 0.504, 0.556, 0.813, 0.916, 1.542, 4.246, 2.772, 2.646, 1.684, 3.478, 1.146, 3.04, 3.148, -0.801, 1.023, 4.054, 2.272, 1.893, 3.322, 2.722, 1.752, 4.487, 1.953, 1.434, 2.424, 2.284, 0.959, 3.542, 0.774, 3.851, 1.793, 1.861, 2.866, 3.043, 2.275, 2.435, 3.091, 2.707, 2.573, 3.391, 3.548, -0.138, 3.432, 3.127, 1.018, 2.915, 3.123, 4.761, 2.462, 2.139, 0.31, 4.092, 3.197, 1.27, 5.5)
+t1 <- rep(c(0,1,0), each = 20)
+t2 <- rep(c(0,0,1), each = 20)
+stan_data <- list(N = 60, y = y, t1 = t1, t2 = t2)
+```
+
+## Step 2 - Specify model in Stan
+We next specify our model in Stan and save this as an R string. The Stan code below encodes the following likelihood and priors.
+
+$$ y_i \sim N(\alpha+\beta_1t1_i+\beta_2t2_i,\sigma_y^2) $$
+$$ p(\alpha)\sim N(0,100); p(\beta1)\sim N(0,100); p(\beta2)\sim N(0,100); p(\sigma) \sim Uniform(0,100) $$
+
+
+```{r}
+# Create Stan model as a string 
+stan_model_string <- "
+data {
+  int<lower=0> N;  // number of observations
+  real y[N];  // outcome variable
+  vector[N] t1;
+  vector[N] t2;
+}
+parameters {
+  // note that since we don't specify any priors Stan uses a uniform prior.
+  // In the case of sigma, since we specify a lower bound, the uniform prior is over (0, infinity)
+  real alpha;
+  real beta1;
+  real beta2;
+  real <lower=0, upper=100> sigma;
+}
+
+
+model {
+  alpha~normal(0,10);
+  beta1~normal(0,10);
+  beta2~normal(0,10);
+  y ~ normal(alpha + beta1*t1+ beta2*t2,sigma);
+}
+"
+```
+
+
+## Step 3 - Fit the model in Stan
+
+```{r}
+# Import rstan library, fit the model to the data, and extract the posterior draws from the fit object
+library(rstan)
+
+fit <- stan(model_code = stan_model_string, data = stan_data, iter = 5000, chains = 4, refresh = 0)
+extracted_values <- extract(fit, permute = TRUE)
+
+```
+
+## Step 4 - Examine output and test for convergence
+Before using the Stan output, it is useful to check that Stan "converged" -- i.e. that the algorithm was successful in approximating the posterior. One useful way to do that is to make sure that the $\hat R$ values reported for each parameter after a call to print(fit) are less than 1.1 and, ideally, right around 1.
+
+```{r}
+library(ggplot2)
+
+# Print a summary table of the fit
+# Rhat should be close to 1 if Stan was able to successfully converge. 
+print(fit)
+
+# Print a traceplot of each parameter (useful for checking whether samples are autocorrelated and chains mixed well)
+# Note that the shinystan package provides a lot more graphs.
+traceplot(fit,  pars = c("alpha" ,"beta1", "beta2"))
+
+# Print a forest plot of all parameters
+plot(fit)
+
+
+
+# Density graph of beta2 - beta1
+diff <- extracted_values$beta2 - extracted_values$beta1
+p <- ggplot(data.frame(diff), aes(x=diff))+ geom_density()
+p
+
+# ggsave(file.path(output_dir, "example 1 - beta 1 and beta 2 posterior.png"), p)
+
+```
+## Step 5 - Test model fit using a test quantity
+A key step in conducting Bayesian analysis is testing the fit of the model. One obvious way to do this is to perform the analysis using several different priors to test the sensitivity of results to different priors.  
+
+Here we demonstrate another way to test model fit through the use of a "test quantity" (Gelman et al, chapter 6). Broadly, Bayesian test quantities are used to compare actual data to simulated data from the model.  To evaluate model fit using a test quantity, we perform X steps.
+
+1. Define a test quantity 
+2. Calculate the value of the test quantity for the actual data
+3. For each simulated draw from the posterior of the parameters...
+    1. Generate a complete new dataset using these values of the parameters and the likelihood
+    2. Calculate the value of the test quantity on the simulated dataset
+4. calculate the proportion of times the value of the test quantity for the actual data is larger than the value of the test quantity from the simulated datasets.
+
+In contrast to frequentist test statistics, Bayesian test quantities may be functions of parameters themselves. For these example, we choose the following test quantity.   
+
+$$ T(y)=max(y_{iϵc} )-min(y_{iϵc} )+max(y_{iϵt1})-min(y_{iϵt1})+max(y_{iϵt2})-min(y_{iϵt}) $$ 
+There is nothing special about this particular test quantity.  We chose this test quantity because it, hopefully, will show if our likelihood is adequately capturing the tails of our data.  If the test quantity is rejected, we may consider a likelihood model with fatter tails such as a multivariate t distribution.
+
+
+```{r}
+df <- data.frame(y, t1, t2)
+
+# calculate the test quantity for the actual data
+control_y <- y[df$t1 ==0 & df$t2 == 0] 
+t1_y <- y[df$t1 ==1]
+t2_y <- y[df$t2 ==1]
+observed_quantity <- max(control_y)-min(control_y)+max(t1_y)-min(t1_y)+max(t2_y)-min(t2_y)
+print("Value of the test quantity for actual data:")
+print(observed_quantity)
+
+draws <- data.frame(extracted_values)
+
+count <- 0
+for (i in 1:nrow(draws)){
+  # generate simulated data using the sampling distribution
+  alpha_sim <- draws$alpha[i]
+  b1_sim <- draws$beta1[i]
+  b2_sim <- draws$beta2[i]
+  sig_sims <- draws$sigma[i]
+  
+  means <- c(rep(alpha_sim,20), rep(alpha_sim+b1_sim,20), rep(alpha_sim+b2_sim,20))
+  y_sim <- means + rnorm(60, mean = 0, sd = sig_sims)
+  
+  control_y <- y_sim[1:20]
+  t1_y <- y_sim[21:40]
+  t2_y <- y_sim[41:60]
+  
+  test <- max(control_y)-min(control_y)+max(t1_y)-min(t1_y)+max(t2_y)-min(t2_y)
+  if (test > observed_quantity) {
+    count <- count+1
+  }
+}
+
+print("Bayesian p-value is:")
+print(count/nrow(draws))
+
+```
+
+
+## Step 6 - Perform inference using Stan output
+To estimate the probability that the effect of the second intervention is larger than the first, we calculate the proportion of draws for which the simulated value for beta2 is greater than the simulated value for beta1.
+
+```{r}
+print("Probability from Stan model that beta 2 is greater than beta 1")
+print(mean(extracted_values$beta2 > extracted_values$beta1))
+
+print("Probability from Stan model that beta 1 - beta 2 <= .1")
+print(mean((extracted_values$beta2+.1) > extracted_values$beta1))
+```
+
+
+## Step 7 - Compare results withl maximum likelihood estimates
+It is useful to compare our results with the results we would have obtained if we naively used the output from maximum likelihood as if it was a posterior.  In this case, since our priors were uninformative, the results are nearly identical.
+
+```{r}
+# Fit a maximum likelihood model to the data.  
+df <- data.frame(y, t1, t2)
+reg_fit <- lm(y ~ t1+ t2, data = df)
+# Calculate probability beta2 > beta1 by treating output from max likelihood as posterior
+vc <- vcov(reg_fit)
+test_equal_se <- (vc[2,2]+vc[3,3]-2*vc[3,2])^.5
+diff <- coef(reg_fit)[2]-coef(reg_fit)[3]
+print("Probability from max likelihood model that beta 2 is greater than beta 1")
+print(pnorm(0, diff, test_equal_se))
+
+```

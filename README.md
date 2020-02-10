@@ -10,7 +10,7 @@ Alternatively, you may download these files by clicking on "clone or download" a
 If you would prefer to read through the notebooks on the website, you may view the individual notebooks by clicking on the links below:
 
 1. [Intro to Stan and RStan](https://rpubs.com/dougj892/ie4dfes1)
-2. ...
+2. [Example 1](https://rpubs.com/dougj892/ie4dfes2)
 
 
 ## Installing R and RStan on your local computer
@@ -47,4 +47,4 @@ The [Stan website](https://mc-stan.org/) includes links to numerous resources fo
 In our view, a much better place to start for Stan newbies is James Savage's notes for his course on how to use Stan which can be found [here](https://khakieconomics.github.io/half_day_course/index.html).
 
 ## Additional Resources for Learning Stan 
-We highly recommend the [vignettes ](https://mc-stan.org/rstan/articles/) for learning the RStan interface.
+The RStan [vignettes ](https://mc-stan.org/rstan/articles/) provides a great introduction to the sRStan interface.
